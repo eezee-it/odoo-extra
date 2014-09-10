@@ -194,11 +194,13 @@ class runbot_repo(osv.osv):
             string='Extra dependencies',
             help="Community addon repos which need to be present to run tests."),
         'token': fields.char("Github token"),
+        'visible': fields.boolean('Visible on the web interface of Runbot'),
     }
     _defaults = {
         'testing': 1,
         'running': 1,
         'auto': True,
+        'visible': True,
     }
 
     def domain(self, cr, uid, context=None):
@@ -987,7 +989,7 @@ class RunbotController(http.Controller):
         repo_obj = registry['runbot.repo']
         count = lambda dom: build_obj.search_count(cr, uid, dom)
 
-        repo_ids = repo_obj.search(cr, uid, [], order='id')
+        repo_ids = repo_obj.search(cr, uid, [('visible', '=', True)], order='id')
         repos = repo_obj.browse(cr, uid, repo_ids)
         if not repo and repos:
             repo = repos[0] 

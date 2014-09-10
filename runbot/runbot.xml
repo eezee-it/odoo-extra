@@ -29,6 +29,7 @@
                         </field>
                         <field name="modules"/>
                         <field name="token"/>
+                        <field name="visible" />
                     </group>
                 </sheet>
             </form>
