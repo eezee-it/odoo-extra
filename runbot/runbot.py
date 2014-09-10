@@ -18,6 +18,7 @@ import subprocess
 import sys
 import time
 from collections import OrderedDict
+import urlparse
 
 import dateutil.parser
 import requests
@@ -151,6 +152,47 @@ def uniq_list(l):
 def fqdn():
     return socket.gethostname()
 
+def startswith(text, prefixes):
+    for prefix in prefixes:
+        if text.startswith(prefix):
+            return True
+    return False
+
+class SchemeNotSupported(Exception):
+    pass
+
+def get_base(url):
+    """
+    Return the hostname and the path for the following patterns:
+        get_base('git@github.com:odoo/odoo.git') == 'github.com/odoo/odoo'
+        get_base('http://github.com/odoo/odoo.git') == 'github.com/odoo/odoo'
+        get_base('https://github.com/odoo/odoo.git') == 'github.com/odoo/odoo'
+        get_base('github.com/odoo/odoo.git') == 'github.com/odoo/odoo'
+    """
+    if url.startswith('git@'):
+        hostname, path = url.split(':')
+        _, hostname = hostname.split('@')
+        parsed_url = urlparse.urlparse(urlparse.urlunsplit(('https', hostname, path, '', '')))
+
+    else:
+        if startswith(url, ('http://', 'https://')):
+            parsed_url = urlparse.urlparse(url)
+        else:
+            if '://' in url:
+                raise SchemeNotSupported()
+
+            parsed_url = urlparse.urlparse('https://' + url)
+
+    def is_bare_repository(url):
+        return url.path.endswith('.git')
+
+    if is_bare_repository(parsed_url):
+        path, _ = os.path.splitext(parsed_url.path)
+        tmp_url = urlparse.urlunsplit((parsed_url.scheme, parsed_url.netloc, path, '', ''))
+        parsed_url = urlparse.urlparse(tmp_url)
+
+    return '%s%s' % (parsed_url.hostname, parsed_url.path,)
+
 #----------------------------------------------------------
 # RunBot Models
 #----------------------------------------------------------
@@ -172,9 +214,7 @@ class runbot_repo(osv.osv):
     def _get_base(self, cr, uid, ids, field_name, arg, context=None):
         result = {}
         for repo in self.browse(cr, uid, ids, context=context):
-            name = re.sub('.+@', '', repo.name)
-            name = name.replace(':','/')
-            result[repo.id] = name
+            result[repo.id] = get_base(repo.name)
         return result
 
     _columns = {
