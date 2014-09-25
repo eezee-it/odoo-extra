@@ -1,5 +1,4 @@
 # -*- encoding: utf-8 -*-
-
 import datetime
 import fcntl
 import glob
@@ -173,6 +172,11 @@ class runbot_repo(osv.osv):
             result[repo.id] = name
         return result
 
+    REPOSITORY_HOSTING = [
+        ('github', 'Github'),
+        ('bitbucket', 'Bitbucket'),
+    ]
+
     _columns = {
         'name': fields.char('Repository', required=True),
         'path': fields.function(_get_path, type='char', string='Directory', readonly=1),
@@ -189,12 +193,14 @@ class runbot_repo(osv.osv):
             id1='dependant_id', id2='dependency_id',
             string='Extra dependencies',
             help="Community addon repos which need to be present to run tests."),
-        'token': fields.char("Github token"),
+        'token': fields.char("Access Token"),
+        'hosting': fields.selection(REPOSITORY_HOSTING, string='Hosting'),
     }
     _defaults = {
         'testing': 1,
         'running': 1,
         'auto': True,
+        'hosting': 'github',
     }
 
     def domain(self, cr, uid, context=None):
