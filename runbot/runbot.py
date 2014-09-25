@@ -227,26 +227,21 @@ class runbot_repo(osv.osv):
             p1.stdout.close()  # Allow p1 to receive a SIGPIPE if p2 exits.
             p2.communicate()[0]
 
-    def github(self, cr, uid, ids, url, payload=None, delete=False, context=None):
+    def github_hosting(self, cr, uid, ids, url, payload=None, delete=False, context=None):
         """Return a http request to be sent to github"""
         for repo in self.browse(cr, uid, ids, context=context):
             if not repo.token:
                 raise Exception('Repository does not have a token to authenticate')
-            match_object = re.search('([^/]+)/([^/]+)/([^/.]+(.git)?)', repo.base)
-            if match_object:
-                url = url.replace(':owner', match_object.group(2))
-                url = url.replace(':repo', match_object.group(3))
-                url = 'https://api.%s%s' % (match_object.group(1),url)
-                session = requests.Session()
-                session.auth = (repo.token,'x-oauth-basic')
-                session.headers.update({'Accept': 'application/vnd.github.she-hulk-preview+json'})
-                if payload:
-                    response = session.post(url, data=simplejson.dumps(payload))
-                elif delete:
-                    response = session.delete(url)
-                else:
-                    response = session.get(url)
-                return response.json()
+
+            return github_hosting(repo, url, payload=None, delete=False)
+
+    def bitbucket_hosting(self, cr, uid, ids, url, payload=None, delete=False, context=None):
+        """Interact with Bitbucket"""
+        for repo in self.browse(cr, uid, ids, context=context):
+            if not repo.token:
+                raise Exception('Repository does not have a token to authenticate')
+
+            return bitbucket_hosting(repo, url, payload=None, delete=False)
 
     def update(self, cr, uid, ids, context=None):
         for repo in self.browse(cr, uid, ids, context=context):
@@ -422,6 +417,32 @@ class runbot_branch(osv.osv):
         'state': fields.char('Status'),
     }
 
+def github_hosting(repo, url, *args, **kwargs):
+    match_object = re.search('([^/]+)/([^/]+)/([^/.]+(.git)?)', repo.base)
+
+    payload = kwargs.get('payload')
+    delete = kwargs.get('delete', False)
+
+    if match_object:
+        url = url.replace(':owner', match_object.group(2))
+        url = url.replace(':repo', match_object.group(3))
+        url = 'https://api.%s%s' % (match_object.group(1), url)
+
+        session = requests.Session()
+        session.auth = (repo.token, 'x-oauth-basic')
+        session.headers.update({'Accept': 'application/vnd.github.she-hulk-preview+json'})
+        if payload:
+            response = session.post(url, data=simplejson.dumps(payload))
+        elif delete:
+            response = session.delete(url)
+        else:
+            response = session.get(url)
+        return response.json()
+
+
+def bitbucket_hosting(repo, url, *args, **kwargs):
+    pass
+
 class runbot_build(osv.osv):
     _name = "runbot.build"
     _order = 'id desc'
@@ -511,7 +532,7 @@ class runbot_build(osv.osv):
             extra_info.update({'state': 'duplicate', 'duplicate_id': duplicate_ids[0]})
             self.write(cr, uid, [duplicate_ids[0]], {'duplicate_id': build_id})
             if self.browse(cr, uid, duplicate_ids[0]).state != 'pending':
-                self.github_status(cr, uid, [build_id])
+                self.update_status_on_commit(cr, uid, [build_id])
         self.write(cr, uid, [build_id], extra_info, context=context)
 
     def reset(self, cr, uid, ids, context=None):
@@ -723,12 +744,15 @@ class runbot_build(osv.osv):
         p=subprocess.Popen(cmd, stdout=out, stderr=stderr, preexec_fn=preexec_fn, shell=shell)
         return p.pid
 
-    def github_status(self, cr, uid, ids, context=None):
+    def update_status_on_commit(self, cr, uid, ids, context=None):
         """Notify github of failed/successful builds"""
         runbot_domain = self.pool['runbot.repo'].domain(cr, uid)
         for build in self.browse(cr, uid, ids, context=context):
+            if not (build.repo_id.hosting and build.repo_id.hosting in ('github', 'bitbucket')):
+                continue
+
             if build.state != 'duplicate' and build.duplicate_id:
-                self.github_status(cr, uid, [build.duplicate_id.id], context=context)
+                self.update_status_on_commit(cr, uid, [build.duplicate_id.id], context=context)
             desc = "runbot build %s" % (build.dest,)
             real_build = build.duplicate_id if build.state == 'duplicate' else build
             if real_build.state == 'testing':
@@ -749,14 +773,19 @@ class runbot_build(osv.osv):
                 "context": "continuous-integration/runbot"
             }
             try:
-                build.repo_id.github('/repos/:owner/:repo/statuses/%s' % build.name, status)
-                _logger.debug("github status %s update to %s", build.name, state)
+                if build.repo_id.hosting == 'github':
+                    build.repo_id.github_hosting('/repos/:owner/:repo/statuses/%s' % build.name, status)
+                elif build.repo_id.hosting == 'bitbucket':
+                    build.repo_id.bitbucket_hosting('/repositories/')
+
+                _logger.debug('%s status %s update to %s',
+                              build.repo_id.hosting, build.name, state)
             except Exception:
                 _logger.exception("github status error")
 
     def job_10_test_base(self, cr, uid, build, lock_path, log_path):
         build._log('test_base', 'Start test base module')
-        build.github_status()
+        build.update_status_on_commit()
         # checkout source
         build.checkout()
         # run base test
@@ -796,7 +825,7 @@ class runbot_build(osv.osv):
         else:
             v['result'] = "ko"
         build.write(v)
-        build.github_status()
+        build.update_status_on_commit()
 
         # run server
         cmd, mods = build.cmd()
@@ -938,7 +967,7 @@ class runbot_build(osv.osv):
             build._log('kill', 'Kill build %s' % build.dest)
             build.terminate()
             build.write({'result': 'killed', 'job': False})
-            build.github_status()
+            build.update_status_on_commit()
 
     def reap(self, cr, uid, ids):
         while True:
