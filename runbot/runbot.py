@@ -193,6 +193,86 @@ def get_base(url):
 
     return '%s%s' % (parsed_url.hostname, path,)
 
+def is_pull_request(branch):
+    return re.match('^\d+$', branch) is not None
+
+class Hosting(object):
+    def __init__(self, token):
+        self.session = requests.Session()
+        self.session.auth = token
+
+    @classmethod
+    def get_api_url(cls, endpoint):
+        return '%s%s' % (cls.API_URL, endpoint)
+
+    @classmethod
+    def get_url(cls, endpoint, *args):
+        tmp_endpoint = endpoint % tuple(args)
+        return '%s%s' % (cls.URL, tmp_endpoint)
+
+    def update_status_on_commit(self, owner, repository, commit_hash):
+        raise NotImplemented()
+
+class GithubHosting(Hosting):
+    API_URL = 'https://api.github.com'
+    URL = 'https://github.com'
+
+    def __init__(self, credentials):
+        token = (credentials, 'x-oauth-basic')
+        super(GithubHosting, self).__init__(token)
+
+        self.session.headers.update({'Accept': 'application/vnd.github.she-hulk-preview+json'})
+
+    def get_pull_requet(self, owner, repository, pull_number):
+        url = self.get_api_url('/repos/%s/%s/pulls/%s' % (owner, repository, pull_number))
+        response = self.session.get(url)
+        return response.json()
+
+    def get_pull_request_branch(self, owner, repository, pull_number):
+        pr = self.get_pull_request(owner, repository, pull_number)
+        return pr['base']['ref']
+
+    def update_status_on_commit(self, owner, repository, commit_hash, status):
+        url = self.get_api_url('/repos/%s/%s/statuses/%s' % (owner, repository, commit_hash))
+        self.session.post(url, status)
+
+    @classmethod
+    def get_branch_url(cls, owner, repository, branch):
+        return cls.get_url('/%s/%s/tree/%s', owner, repository, branch)
+
+    @classmethod
+    def get_pull_request_url(cls, owner, repository, pull_number):
+        return cls.get_url('/%s/%s/pull/%s', owner, repository, pull_number)
+
+class BitBucketHosting(Hosting):
+    API_URL = 'https://bitbucket.org/api/2.0'
+    URL = 'https://bitbucket.org'
+
+    def __init__(self, credentials):
+        super(BitBucketHosting, self).__init__(credentials)
+
+    def get_pull_request(self, owner, repository, pull_number):
+        url = self.get_api_url('/repositories/%s/%s/pullrequests/%s' % (owner, repository, pull_number))
+        reponse = self.session.get(url)
+        return response.json()
+
+    def get_pull_request_branch(self, owner, repository, pull_number):
+        pr = self.get_pull_request(owner, repository, pull_number)
+        return pr['source']['branch']['name']
+
+    @classmethod
+    def get_branch_url(cls, owner, repository, branch):
+        return cls.get_url('/%s/%s/branch/%s', owner, repository, branch)
+
+    @classmethod
+    def get_pull_request_url(cls, owner, repository, pull_number):
+        return cls.get_url('/%s/%s/pull-request/%s', owner, repository, pull_number)
+
+HOSTING_MAPPING = {
+    'github': GithubHosting,
+    'bitbucket': BitBucketHosting
+}
+
 #----------------------------------------------------------
 # RunBot Models
 #----------------------------------------------------------
@@ -240,6 +320,8 @@ class runbot_repo(osv.osv):
             help="Community addon repos which need to be present to run tests."),
         'token': fields.char("Access Token"),
         'hosting': fields.selection(REPOSITORY_HOSTING, string='Hosting'),
+        'username': fields.char('Username'),
+        'password': fields.char('Password'),
     }
     _defaults = {
         'testing': 1,
@@ -271,6 +353,36 @@ class runbot_repo(osv.osv):
             p2 = subprocess.Popen(['tar', '-xC', dest], stdin=p1.stdout, stdout=subprocess.PIPE)
             p1.stdout.close()  # Allow p1 to receive a SIGPIPE if p2 exits.
             p2.communicate()[0]
+
+    def get_pull_request_branch(self, cr, uid, ids, pull_number, context=None):
+        match = re.search('([^/]+)/([^/]+)/([^/.]+(.git)?)', repo.base)
+
+        if match:
+            owner = match.group(2)
+            repository = match.group(3)
+
+            for repo in self.browse(cr, uid, ids, context=context):
+                if repo.hosting == 'github':
+                    hosting = GithubHosting(repo.token)
+                elif repo.hosting == 'bitbucket':
+                    hosting = BitBucketHosting((repo.username, repo.password))
+
+                return hosting.get_pull_request_branch(owner, repository, pull_number)
+
+    def update_status_on_commit(self, cr, uid, ids, status, context=None):
+        match = re.search('([^/]+)/([^/]+)/([^/.]+(.git)?)', repo.base)
+
+        if not match:
+            return
+
+        owner = match.group(2)
+        repository = match.group(3)
+
+        for repo in self.browse(cr, uid, ids, context=context):
+            if repo.hosting == 'github':
+                hosting = GithubHosting(repo.token)
+                return hosting.update_status_on_commit(owner, repository, status)
+
 
     def github_hosting(self, cr, uid, ids, url, payload=None, delete=False, context=None):
         """Return a http request to be sent to github"""
@@ -445,11 +557,16 @@ class runbot_branch(osv.osv):
 
     def _get_branch_url(self, cr, uid, ids, field_name, arg, context=None):
         r = {}
+
         for branch in self.browse(cr, uid, ids, context=context):
-            if re.match('^[0-9]+$', branch.branch_name):
-                r[branch.id] = "https://%s/pull/%s" % (branch.repo_id.base, branch.branch_name)
+            owner, repository = branch.repo_id.base.split('/')[1:]
+            mapping = HOSTING_MAPPING[branch.repo_id.hosting]
+
+            if is_pull_request(branch.branch_name):
+                r[branch.id] = mapping.get_pull_request_url(owner, repository, branch.branch_name)
             else:
-                r[branch.id] = "https://%s/tree/%s" % (branch.repo_id.base, branch.branch_name)
+                r[branch.id] = mapping.get_branch_url(owner, repository, branch.branch_name)
+
         return r
 
     _columns = {
@@ -461,32 +578,6 @@ class runbot_branch(osv.osv):
         'coverage': fields.boolean('Coverage'),
         'state': fields.char('Status'),
     }
-
-def github_hosting(repo, url, *args, **kwargs):
-    match_object = re.search('([^/]+)/([^/]+)/([^/.]+(.git)?)', repo.base)
-
-    payload = kwargs.get('payload')
-    delete = kwargs.get('delete', False)
-
-    if match_object:
-        url = url.replace(':owner', match_object.group(2))
-        url = url.replace(':repo', match_object.group(3))
-        url = 'https://api.%s%s' % (match_object.group(1), url)
-
-        session = requests.Session()
-        session.auth = (repo.token, 'x-oauth-basic')
-        session.headers.update({'Accept': 'application/vnd.github.she-hulk-preview+json'})
-        if payload:
-            response = session.post(url, data=simplejson.dumps(payload))
-        elif delete:
-            response = session.delete(url)
-        else:
-            response = session.get(url)
-        return response.json()
-
-
-def bitbucket_hosting(repo, url, *args, **kwargs):
-    pass
 
 class runbot_build(osv.osv):
     _name = "runbot.build"
@@ -623,8 +714,9 @@ class runbot_build(osv.osv):
             # Use github API to find name of branch on which the PR is made
             if repo.token and name.startswith('refs/pull/'):
                 pull_number = name[len('refs/pull/'):]
-                pr = repo.github('/repos/:owner/:repo/pulls/%s' % pull_number)
-                name = 'refs/heads/' + pr['base']['ref']
+
+                name = self.repo.get_pull_request_branch(pull_number)
+
             # Find common branch names between repo and target repo
             branch_ids = branch_pool.search(cr, uid, [('repo_id.id', '=', repo.id)])
             target_ids = branch_pool.search(cr, uid, [('repo_id.id', '=', target_repo_id)])
@@ -646,16 +738,16 @@ class runbot_build(osv.osv):
                     name = sorted(common_refs.iteritems(), key=operator.itemgetter(1), reverse=True)[0][0]
             return name
 
-    def path(self, cr, uid, ids, *l, **kw):
+    def path(self, cr, uid, ids, *args, **kwargs):
         for build in self.browse(cr, uid, ids, context=None):
             root = self.pool['runbot.repo'].root(cr, uid)
-            return os.path.join(root, 'build', build.dest, *l)
+            return os.path.join(root, 'build', build.dest, *args)
 
-    def server(self, cr, uid, ids, *l, **kw):
+    def server(self, cr, uid, ids, *args, **kwargs):
         for build in self.browse(cr, uid, ids, context=None):
             if os.path.exists(build.path('odoo')):
-                return build.path('odoo', *l)
-            return build.path('openerp', *l)
+                return build.path('odoo', *args)
+            return build.path('openerp', *args)
 
     def checkout(self, cr, uid, ids, context=None):
         for build in self.browse(cr, uid, ids, context=context):
@@ -811,22 +903,18 @@ class runbot_build(osv.osv):
             else:
                 continue
 
-            status = {
-                "state": state,
-                "target_url": "http://%s/runbot/build/%s" % (runbot_domain, build.id),
-                "description": desc,
-                "context": "continuous-integration/runbot"
-            }
             try:
                 if build.repo_id.hosting == 'github':
-                    build.repo_id.github_hosting('/repos/:owner/:repo/statuses/%s' % build.name, status)
-                elif build.repo_id.hosting == 'bitbucket':
-                    build.repo_id.bitbucket_hosting('/repositories/')
-
-                _logger.debug('%s status %s update to %s',
-                              build.repo_id.hosting, build.name, state)
+                    status = {
+                        "state": state,
+                        "target_url": "http://%s/runbot/build/%s" % (runbot_domain, build.id),
+                        "description": desc,
+                        "context": "continuous-integration/runbot"
+                    }
+                    build.repo_id.update_status_on_commit(status)
+                    _logger.debug('github status %s update to %s', build.name, state)
             except Exception:
-                _logger.exception("github status error")
+                _logger.exception('github status error')
 
     def job_10_test_base(self, cr, uid, build, lock_path, log_path):
         build._log('test_base', 'Start test base module')

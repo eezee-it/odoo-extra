@@ -30,6 +30,8 @@
                         <field name="modules"/>
                         <field name="token"/>
                         <field name="hosting" />
+                        <field name="username" />
+                        <field name="password" />
                     </group>
                 </sheet>
             </form>
