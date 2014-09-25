@@ -186,7 +186,12 @@ def get_base(url):
         tmp_url = urlparse.urlunsplit((parsed_url.scheme, parsed_url.netloc, path, '', ''))
         parsed_url = urlparse.urlparse(tmp_url)
 
-    return '%s%s' % (parsed_url.hostname, parsed_url.path,)
+    if parsed_url.path.endswith('/'):
+        path = parsed_url.path[:-1]
+    else:
+        path = parsed_url.path
+
+    return '%s%s' % (parsed_url.hostname, path,)
 
 #----------------------------------------------------------
 # RunBot Models
