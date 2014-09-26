@@ -404,22 +404,7 @@ class runbot_repo(osv.osv):
                 hosting = GithubHosting(repo.token)
                 return hosting.update_status_on_commit(owner, repository, status)
 
-
-    def github_hosting(self, cr, uid, ids, url, payload=None, delete=False, context=None):
-        """Return a http request to be sent to github"""
-        for repo in self.browse(cr, uid, ids, context=context):
-            if not repo.token:
-                raise Exception('Repository does not have a token to authenticate')
-
-            return github_hosting(repo, url, payload=None, delete=False)
-
-    def bitbucket_hosting(self, cr, uid, ids, url, payload=None, delete=False, context=None):
-        """Interact with Bitbucket"""
-        for repo in self.browse(cr, uid, ids, context=context):
-            if not repo.token:
-                raise Exception('Repository does not have a token to authenticate')
-
-            return bitbucket_hosting(repo, url, payload=None, delete=False)
+            # For the Bitbucket hosting, this feature does not exists.
 
     def update(self, cr, uid, ids, context=None):
         for repo in self.browse(cr, uid, ids, context=context):
@@ -613,9 +598,8 @@ class runbot_build(osv.osv):
 
     def _get_time(self, cr, uid, ids, field_name, arg, context=None):
         """Return the time taken by the tests"""
-        r = {}
+        r = dict.fromkeys(ids, 0)
         for build in self.browse(cr, uid, ids, context=context):
-            r[build.id] = 0
             if build.job_end:
                 r[build.id] = int(dt2time(build.job_end) - dt2time(build.job_start))
             elif build.job_start:
@@ -624,9 +608,8 @@ class runbot_build(osv.osv):
 
     def _get_age(self, cr, uid, ids, field_name, arg, context=None):
         """Return the time between job start and now"""
-        r = {}
+        r = dict.fromkeys(ids, 0)
         for build in self.browse(cr, uid, ids, context=context):
-            r[build.id] = 0
             if build.job_start:
                 r[build.id] = int(time.time() - dt2time(build.job_start))
         return r
