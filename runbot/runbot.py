@@ -223,7 +223,7 @@ class GithubHosting(Hosting):
 
         self.session.headers.update({'Accept': 'application/vnd.github.she-hulk-preview+json'})
 
-    def get_pull_requet(self, owner, repository, pull_number):
+    def get_pull_request(self, owner, repository, pull_number):
         url = self.get_api_url('/repos/%s/%s/pulls/%s' % (owner, repository, pull_number))
         response = self.session.get(url)
         return response.json()
