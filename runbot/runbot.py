@@ -344,7 +344,7 @@ class runbot_repo(osv.osv):
         'hosting': fields.selection(REPOSITORY_HOSTING, string='Hosting'),
         'username': fields.char('Username'),
         'password': fields.char('Password'),
-        'specific_reference': fields.char('Specific Reference', help="You can select a specific refs/tags/TAG or a specific refs/heads/BRANCH")
+        'specific_reference': fields.char('Specific Reference', help="You can select a specific refs/tags/TAG or a specific refs/heads/BRANCH"),
         'visible': fields.boolean('Visible on the web interface of Runbot'),
     }
     _defaults = {
