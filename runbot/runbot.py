@@ -381,13 +381,13 @@ class runbot_repo(osv.osv):
             p2.communicate()[0]
 
     def get_pull_request_branch(self, cr, uid, ids, pull_number, context=None):
-        match = re.search('([^/]+)/([^/]+)/([^/.]+(.git)?)', repo.base)
+        for repo in self.browse(cr, uid, ids, context=context):
+            match = re.search('([^/]+)/([^/]+)/([^/.]+(.git)?)', repo.base)
 
-        if match:
-            owner = match.group(2)
-            repository = match.group(3)
+            if match:
+                owner = match.group(2)
+                repository = match.group(3)
 
-            for repo in self.browse(cr, uid, ids, context=context):
                 if repo.hosting == 'github':
                     hosting = GithubHosting(repo.token)
                 elif repo.hosting == 'bitbucket':
@@ -396,15 +396,16 @@ class runbot_repo(osv.osv):
                 return hosting.get_pull_request_branch(owner, repository, pull_number)
 
     def update_status_on_commit(self, cr, uid, ids, status, context=None):
-        match = re.search('([^/]+)/([^/]+)/([^/.]+(.git)?)', repo.base)
-
-        if not match:
-            return
-
-        owner = match.group(2)
-        repository = match.group(3)
-
         for repo in self.browse(cr, uid, ids, context=context):
+
+            match = re.search('([^/]+)/([^/]+)/([^/.]+(.git)?)', repo.base)
+
+            if not match:
+                return
+
+            owner = match.group(2)
+            repository = match.group(3)
+
             if repo.hosting == 'github':
                 hosting = GithubHosting(repo.token)
                 return hosting.update_status_on_commit(owner, repository, status)
