@@ -344,6 +344,7 @@ class runbot_repo(osv.osv):
         'hosting': fields.selection(REPOSITORY_HOSTING, string='Hosting'),
         'username': fields.char('Username'),
         'password': fields.char('Password'),
+        'specific_reference': fields.char('Specific Reference', help="You can select a specific refs/tags/TAG or a specific refs/heads/BRANCH")
     }
     _defaults = {
         'testing': 1,
@@ -422,28 +423,59 @@ class runbot_repo(osv.osv):
         if not os.path.isdir(os.path.join(repo.path, 'refs')):
             run(['git', 'clone', '--bare', repo.name, repo.path])
         else:
+            # We fetch all the branches
             repo.git(['fetch', '-p', 'origin', '+refs/heads/*:refs/heads/*'])
-            repo.git(['fetch', '-p', 'origin', '+refs/pull/*/head:refs/pull/*'])
+            if repo.hosting == 'github':
+                # In the case where we use the Github Hosting, we can have
+                # the pull request in the references of Git.
+                repo.git(['fetch', '-p', 'origin', '+refs/pull/*/head:refs/pull/*'])
+            # We fetch all the tags
+            repo.git(['fetch', '-p', 'origin', '+refs/tags/*:refs/tags/*'])
 
-        fields = ['refname','objectname','committerdate:iso8601','authorname','subject','committername']
+        fields = [
+            'refname', 'objectname', 'committerdate:iso8601', 'authorname',
+            'subject','committername'
+        ]
         fmt = "%00".join(["%("+field+")" for field in fields])
-        git_refs = repo.git(['for-each-ref', '--format', fmt, '--sort=-committerdate', 'refs/heads', 'refs/pull'])
+
+        git_refs = repo.git([
+            'for-each-ref', '--format', fmt, '--sort=-committerdate',
+            'refs/heads', 'refs/pull', 'refs/tags'
+        ])
+
         git_refs = git_refs.strip()
 
-        refs = [[decode_utf(field) for field in line.split('\x00')] for line in git_refs.split('\n')]
+        refs = [
+            [decode_utf(field) for field in line.split('\x00')]
+            for line in git_refs.split('\n')
+        ]
 
         for name, sha, date, author, subject, committer in refs:
+            if repo.specific_reference and repo.specific_reference != name:
+                continue
+
             # create or get branch
             branch_ids = Branch.search(cr, uid, [('repo_id', '=', repo.id), ('name', '=', name)])
             if branch_ids:
                 branch_id = branch_ids[0]
             else:
                 _logger.debug('repo %s found new branch %s', repo.name, name)
-                branch_id = Branch.create(cr, uid, {'repo_id': repo.id, 'name': name})
+                values = {
+                    'repo_id': repo.id,
+                    'name': name
+                }
+                if repo.specific_reference == name:
+                    values['sticky'] = True
+
+                branch_id = Branch.create(cr, uid, values)
+
+            # We load the branch
             branch = Branch.browse(cr, uid, [branch_id], context=context)[0]
-            # skip build for old branches
-            if dateutil.parser.parse(date[:19]) + datetime.timedelta(30) < datetime.datetime.now():
+
+            # skip build for old not sticky branches
+            if not branch.sticky and dateutil.parser.parse(date[:19]) + datetime.timedelta(30) < datetime.datetime.now():
                 continue
+
             # create build (and mark previous builds as skipped) if not found
             build_ids = Build.search(cr, uid, [('branch_id', '=', branch.id), ('name', '=', sha)])
             if not build_ids:
@@ -579,6 +611,7 @@ class runbot_branch(osv.osv):
 
     _columns = {
         'repo_id': fields.many2one('runbot.repo', 'Repository', required=True, ondelete='cascade', select=1),
+        'repo_specific_ref': fields.related('repo_id', 'specific_reference', type='char'),
         'name': fields.char('Ref Name', required=True),
         'branch_name': fields.function(_get_branch_name, type='char', string='Branch', readonly=1, store=True),
         'branch_url': fields.function(_get_branch_url, type='char', string='Branch url', readonly=1),
