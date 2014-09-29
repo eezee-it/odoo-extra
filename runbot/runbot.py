@@ -64,7 +64,8 @@ _re_error = r'^(?:\d{4}-\d\d-\d\d \d\d:\d\d:\d\d,\d{3} \d+ (?:ERROR|CRITICAL) )|
 _re_warning = r'^\d{4}-\d\d-\d\d \d\d:\d\d:\d\d,\d{3} \d+ WARNING '
 _re_job = re.compile('job_\d')
 
-
+RUNBOT_DEFAULT_RUNNING_MAX = 75
+RUNBOT_DEFAULT_WORKERS = 6
 #----------------------------------------------------------
 # RunBot helpers
 #----------------------------------------------------------
@@ -465,14 +466,15 @@ class runbot_repo(osv.osv):
         # skip old builds (if their sequence number is too low, they will not ever be built)
         skippable_domain = [('repo_id', '=', repo.id), ('state', '=', 'pending')]
         icp = self.pool['ir.config_parameter']
-        running_max = int(icp.get_param(cr, uid, 'runbot.running_max', default=75))
+        running_max = int(icp.get_param(cr, uid, 'runbot.running_max', default=RUNBOT_DEFAULT_RUNNING_MAX))
         to_be_skipped_ids = Build.search(cr, uid, skippable_domain, order='sequence desc', offset=running_max)
         Build.skip(cr, uid, to_be_skipped_ids)
 
     def scheduler(self, cr, uid, ids=None, context=None):
         icp = self.pool['ir.config_parameter']
-        workers = int(icp.get_param(cr, uid, 'runbot.workers', default=6))
-        running_max = int(icp.get_param(cr, uid, 'runbot.running_max', default=75))
+        workers = int(icp.get_param(cr, uid, 'runbot.workers', default=RUNBOT_DEFAULT_WORKERS))
+        running_max = int(icp.get_param(cr, uid, 'runbot.running_max', default=RUNBOT_DEFAULT_RUNNING_MAX))
+
         host = fqdn()
 
         Build = self.pool['runbot.build']
