@@ -155,6 +155,7 @@
             <tree string="Builds">
                 <field name="sequence"/>
                 <field name="repo_id"/>
+                <field name="repo_specific_ref" />
                 <field name="dest"/>
                 <field name="date"/>
                 <field name="author"/>

@@ -617,7 +617,7 @@ class runbot_branch(osv.osv):
 
     _columns = {
         'repo_id': fields.many2one('runbot.repo', 'Repository', required=True, ondelete='cascade', select=1),
-        'repo_specific_ref': fields.related('repo_id', 'specific_reference', type='char'),
+        'repo_specific_ref': fields.related('repo_id', 'specific_reference', type='char', string='Reference'),
         'name': fields.char('Ref Name', required=True),
         'branch_name': fields.function(_get_branch_name, type='char', string='Branch', readonly=1, store=True),
         'branch_url': fields.function(_get_branch_url, type='char', string='Branch url', readonly=1),
@@ -668,6 +668,7 @@ class runbot_build(osv.osv):
     _columns = {
         'branch_id': fields.many2one('runbot.branch', 'Branch', required=True, ondelete='cascade', select=1),
         'repo_id': fields.related('branch_id', 'repo_id', type="many2one", relation="runbot.repo", string="Repository", readonly=True, store=True, ondelete='cascade', select=1),
+        'repo_specific_ref': fields.related('repo_id', 'specific_reference', type='char', string='Reference'),
         'name': fields.char('Revno', required=True, select=1),
         'host': fields.char('Host'),
         'port': fields.integer('Port'),
