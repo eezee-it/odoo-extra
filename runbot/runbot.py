@@ -345,12 +345,14 @@ class runbot_repo(osv.osv):
         'username': fields.char('Username'),
         'password': fields.char('Password'),
         'specific_reference': fields.char('Specific Reference', help="You can select a specific refs/tags/TAG or a specific refs/heads/BRANCH")
+        'visible': fields.boolean('Visible on the web interface of Runbot'),
     }
     _defaults = {
         'testing': 1,
         'running': 1,
         'auto': True,
         'hosting': 'github',
+        'visible': True,
     }
 
     def domain(self, cr, uid, context=None):
@@ -1190,7 +1192,7 @@ class RunbotController(http.Controller):
         repo_obj = registry['runbot.repo']
         count = lambda dom: build_obj.search_count(cr, uid, dom)
 
-        repo_ids = repo_obj.search(cr, uid, [], order='id')
+        repo_ids = repo_obj.search(cr, uid, [('visible', '=', True)], order='id')
         repos = repo_obj.browse(cr, uid, repo_ids)
         if not repo and repos:
             repo = repos[0] 

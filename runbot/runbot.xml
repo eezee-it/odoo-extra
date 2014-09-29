@@ -36,6 +36,7 @@
                         <field name="username" />
                         <field name="password" />
                         <field name="specific_reference" />
+                        <field name="visible" />
                     </group>
                 </sheet>
             </form>
