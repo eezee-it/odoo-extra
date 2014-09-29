@@ -66,6 +66,7 @@ _re_job = re.compile('job_\d')
 
 RUNBOT_DEFAULT_RUNNING_MAX = 75
 RUNBOT_DEFAULT_WORKERS = 6
+RUNBOT_MAXIMUM_DAYS = 30
 #----------------------------------------------------------
 # RunBot helpers
 #----------------------------------------------------------
@@ -452,6 +453,9 @@ class runbot_repo(osv.osv):
             for line in git_refs.split('\n')
         ]
 
+        icp = self.pool['ir.config_parameter']
+        max_days = int(icp.get_param(cr, uid, 'runbot.branch_max_days', default=RUNBOT_MAXIMUM_DAYS))
+
         for name, sha, date, author, subject, committer in refs:
             if repo.specific_reference and repo.specific_reference != name:
                 continue
@@ -475,7 +479,7 @@ class runbot_repo(osv.osv):
             branch = Branch.browse(cr, uid, [branch_id], context=context)[0]
 
             # skip build for old not sticky branches
-            if not branch.sticky and dateutil.parser.parse(date[:19]) + datetime.timedelta(30) < datetime.datetime.now():
+            if not branch.sticky and dateutil.parser.parse(date[:19]) + datetime.timedelta(max_days) < datetime.datetime.now():
                 continue
 
             # create build (and mark previous builds as skipped) if not found

@@ -25,11 +25,12 @@ class runbot_config_settings(osv.osv_memory):
     _name = 'runbot.config.settings'
     _inherit = 'res.config.settings'
     _columns = {
-    	'default_workers': fields.integer('Total Number of Workers'),
+        'default_workers': fields.integer('Total Number of Workers'),
         'default_running_max': fields.integer('Maximum Number of Running Builds'),
         'default_timeout': fields.integer('Default Timeout (in seconds)'),
         'default_starting_port': fields.integer('Starting Port for Running Builds'),
         'default_domain': fields.char('Runbot Domain'),
+        'default_branch_max_days': fields.integer('Maximum Days for the Branches'),
     }
 
     def get_default_parameters(self, cr, uid, fields, context=None):
@@ -39,12 +40,15 @@ class runbot_config_settings(osv.osv_memory):
         timeout = icp.get_param(cr, uid, 'runbot.timeout', default=1800)
         starting_port = icp.get_param(cr, uid, 'runbot.starting_port', default=2000)
         runbot_domain = icp.get_param(cr, uid, 'runbot.domain', default='runbot.odoo.com')
+        branch_max_days = icp.get_param(cr, uid, 'runbot.branch_max_days', default=30)
+
         return {
-        	'default_workers': int(workers),
-        	'default_running_max': int(running_max),
+            'default_workers': int(workers),
+            'default_running_max': int(running_max),
             'default_timeout': int(timeout),
             'default_starting_port': int(starting_port),
             'default_domain': runbot_domain,
+            'default_branch_max_days': int(branch_max_days),
         }
 
     def set_default_parameters(self, cr, uid, ids, context=None):
@@ -55,6 +59,7 @@ class runbot_config_settings(osv.osv_memory):
         icp.set_param(cr, uid, 'runbot.timeout', config.default_timeout)
         icp.set_param(cr, uid, 'runbot.starting_port', config.default_starting_port)
         icp.set_param(cr, uid, 'runbot.domain', config.default_domain)
+        icp.set_param(cr, uid, 'runbot.branch_max_days', config.default_branch_max_days)
 
 
 # vim:expandtab:smartindent:tabstop=4:softtabstop=4:shiftwidth=4:
