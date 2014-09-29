@@ -1,4 +1,24 @@
 # -*- encoding: utf-8 -*-
+##############################################################################
+#
+#    OpenERP, Open Source Management Solution
+#    Copyright (C) 2004-2014 Odoo S.A. (<http://odoo.com>).
+#    Copyright (C) 2014 - Stephane Wirtel <stephane@wirtel.be>.
+#
+#    This program is free software: you can redistribute it and/or modify
+#    it under the terms of the GNU Affero General Public License as
+#    published by the Free Software Foundation, either version 3 of the
+#    License, or (at your option) any later version.
+#
+#    This program is distributed in the hope that it will be useful,
+#    but WITHOUT ANY WARRANTY; without even the implied warranty of
+#    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+#    GNU Affero General Public License for more details.
+#
+#    You should have received a copy of the GNU Affero General Public License
+#    along with this program.  If not, see <http://www.gnu.org/licenses/>.
+#
+##############################################################################
 
 import datetime
 import fcntl
@@ -18,6 +38,7 @@ import subprocess
 import sys
 import time
 from collections import OrderedDict
+import urlparse
 
 import dateutil.parser
 import requests
@@ -43,7 +64,8 @@ _re_error = r'^(?:\d{4}-\d\d-\d\d \d\d:\d\d:\d\d,\d{3} \d+ (?:ERROR|CRITICAL) )|
 _re_warning = r'^\d{4}-\d\d-\d\d \d\d:\d\d:\d\d,\d{3} \d+ WARNING '
 _re_job = re.compile('job_\d')
 
-
+RUNBOT_DEFAULT_RUNNING_MAX = 75
+RUNBOT_DEFAULT_WORKERS = 6
 #----------------------------------------------------------
 # RunBot helpers
 #----------------------------------------------------------
@@ -145,7 +167,133 @@ def uniq_list(l):
     return OrderedDict.fromkeys(l).keys()
 
 def fqdn():
-    return socket.gethostname()
+    return socket.getfqdn()
+
+def startswith(text, prefixes):
+    for prefix in prefixes:
+        if text.startswith(prefix):
+            return True
+    return False
+
+class SchemeNotSupported(Exception):
+    pass
+
+def get_base(url):
+    """
+    Return the hostname and the path for the following patterns:
+        get_base('git@github.com:odoo/odoo.git') == 'github.com/odoo/odoo'
+        get_base('http://github.com/odoo/odoo.git') == 'github.com/odoo/odoo'
+        get_base('https://github.com/odoo/odoo.git') == 'github.com/odoo/odoo'
+        get_base('github.com/odoo/odoo.git') == 'github.com/odoo/odoo'
+    """
+    if url.startswith('git@'):
+        hostname, path = url.split(':')
+        _, hostname = hostname.split('@')
+        parsed_url = urlparse.urlparse(urlparse.urlunsplit(('https', hostname, path, '', '')))
+
+    else:
+        if startswith(url, ('http://', 'https://')):
+            parsed_url = urlparse.urlparse(url)
+        else:
+            if '://' in url:
+                raise SchemeNotSupported()
+
+            parsed_url = urlparse.urlparse('https://' + url)
+
+    def is_bare_repository(url):
+        return url.path.endswith('.git')
+
+    if is_bare_repository(parsed_url):
+        path, _ = os.path.splitext(parsed_url.path)
+        tmp_url = urlparse.urlunsplit((parsed_url.scheme, parsed_url.netloc, path, '', ''))
+        parsed_url = urlparse.urlparse(tmp_url)
+
+    if parsed_url.path.endswith('/'):
+        path = parsed_url.path[:-1]
+    else:
+        path = parsed_url.path
+
+    return '%s%s' % (parsed_url.hostname, path,)
+
+def is_pull_request(branch):
+    return re.match('^\d+$', branch) is not None
+
+class Hosting(object):
+    def __init__(self, token):
+        self.session = requests.Session()
+        self.session.auth = token
+
+    @classmethod
+    def get_api_url(cls, endpoint):
+        return '%s%s' % (cls.API_URL, endpoint)
+
+    @classmethod
+    def get_url(cls, endpoint, *args):
+        tmp_endpoint = endpoint % tuple(args)
+        return '%s%s' % (cls.URL, tmp_endpoint)
+
+    def update_status_on_commit(self, owner, repository, commit_hash):
+        raise NotImplemented()
+
+class GithubHosting(Hosting):
+    API_URL = 'https://api.github.com'
+    URL = 'https://github.com'
+
+    def __init__(self, credentials):
+        token = (credentials, 'x-oauth-basic')
+        super(GithubHosting, self).__init__(token)
+
+        self.session.headers.update({'Accept': 'application/vnd.github.she-hulk-preview+json'})
+
+    def get_pull_request(self, owner, repository, pull_number):
+        url = self.get_api_url('/repos/%s/%s/pulls/%s' % (owner, repository, pull_number))
+        response = self.session.get(url)
+        return response.json()
+
+    def get_pull_request_branch(self, owner, repository, pull_number):
+        pr = self.get_pull_request(owner, repository, pull_number)
+        return pr['base']['ref']
+
+    def update_status_on_commit(self, owner, repository, commit_hash, status):
+        url = self.get_api_url('/repos/%s/%s/statuses/%s' % (owner, repository, commit_hash))
+        self.session.post(url, status)
+
+    @classmethod
+    def get_branch_url(cls, owner, repository, branch):
+        return cls.get_url('/%s/%s/tree/%s', owner, repository, branch)
+
+    @classmethod
+    def get_pull_request_url(cls, owner, repository, pull_number):
+        return cls.get_url('/%s/%s/pull/%s', owner, repository, pull_number)
+
+class BitBucketHosting(Hosting):
+    API_URL = 'https://bitbucket.org/api/2.0'
+    URL = 'https://bitbucket.org'
+
+    def __init__(self, credentials):
+        super(BitBucketHosting, self).__init__(credentials)
+
+    def get_pull_request(self, owner, repository, pull_number):
+        url = self.get_api_url('/repositories/%s/%s/pullrequests/%s' % (owner, repository, pull_number))
+        reponse = self.session.get(url)
+        return response.json()
+
+    def get_pull_request_branch(self, owner, repository, pull_number):
+        pr = self.get_pull_request(owner, repository, pull_number)
+        return pr['source']['branch']['name']
+
+    @classmethod
+    def get_branch_url(cls, owner, repository, branch):
+        return cls.get_url('/%s/%s/branch/%s', owner, repository, branch)
+
+    @classmethod
+    def get_pull_request_url(cls, owner, repository, pull_number):
+        return cls.get_url('/%s/%s/pull-request/%s', owner, repository, pull_number)
+
+HOSTING_MAPPING = {
+    'github': GithubHosting,
+    'bitbucket': BitBucketHosting
+}
 
 #----------------------------------------------------------
 # RunBot Models
@@ -168,10 +316,13 @@ class runbot_repo(osv.osv):
     def _get_base(self, cr, uid, ids, field_name, arg, context=None):
         result = {}
         for repo in self.browse(cr, uid, ids, context=context):
-            name = re.sub('.+@', '', repo.name)
-            name = name.replace(':','/')
-            result[repo.id] = name
+            result[repo.id] = get_base(repo.name)
         return result
+
+    REPOSITORY_HOSTING = [
+        ('github', 'Github'),
+        ('bitbucket', 'Bitbucket'),
+    ]
 
     _columns = {
         'name': fields.char('Repository', required=True),
@@ -189,12 +340,19 @@ class runbot_repo(osv.osv):
             id1='dependant_id', id2='dependency_id',
             string='Extra dependencies',
             help="Community addon repos which need to be present to run tests."),
-        'token': fields.char("Github token"),
+        'token': fields.char("Access Token"),
+        'hosting': fields.selection(REPOSITORY_HOSTING, string='Hosting'),
+        'username': fields.char('Username'),
+        'password': fields.char('Password'),
+        'specific_reference': fields.char('Specific Reference', help="You can select a specific refs/tags/TAG or a specific refs/heads/BRANCH")
+        'visible': fields.boolean('Visible on the web interface of Runbot'),
     }
     _defaults = {
         'testing': 1,
         'running': 1,
         'auto': True,
+        'hosting': 'github',
+        'visible': True,
     }
 
     def domain(self, cr, uid, context=None):
@@ -221,26 +379,36 @@ class runbot_repo(osv.osv):
             p1.stdout.close()  # Allow p1 to receive a SIGPIPE if p2 exits.
             p2.communicate()[0]
 
-    def github(self, cr, uid, ids, url, payload=None, delete=False, context=None):
-        """Return a http request to be sent to github"""
+    def get_pull_request_branch(self, cr, uid, ids, pull_number, context=None):
+        match = re.search('([^/]+)/([^/]+)/([^/.]+(.git)?)', repo.base)
+
+        if match:
+            owner = match.group(2)
+            repository = match.group(3)
+
+            for repo in self.browse(cr, uid, ids, context=context):
+                if repo.hosting == 'github':
+                    hosting = GithubHosting(repo.token)
+                elif repo.hosting == 'bitbucket':
+                    hosting = BitBucketHosting((repo.username, repo.password))
+
+                return hosting.get_pull_request_branch(owner, repository, pull_number)
+
+    def update_status_on_commit(self, cr, uid, ids, status, context=None):
+        match = re.search('([^/]+)/([^/]+)/([^/.]+(.git)?)', repo.base)
+
+        if not match:
+            return
+
+        owner = match.group(2)
+        repository = match.group(3)
+
         for repo in self.browse(cr, uid, ids, context=context):
-            if not repo.token:
-                raise Exception('Repository does not have a token to authenticate')
-            match_object = re.search('([^/]+)/([^/]+)/([^/.]+(.git)?)', repo.base)
-            if match_object:
-                url = url.replace(':owner', match_object.group(2))
-                url = url.replace(':repo', match_object.group(3))
-                url = 'https://api.%s%s' % (match_object.group(1),url)
-                session = requests.Session()
-                session.auth = (repo.token,'x-oauth-basic')
-                session.headers.update({'Accept': 'application/vnd.github.she-hulk-preview+json'})
-                if payload:
-                    response = session.post(url, data=simplejson.dumps(payload))
-                elif delete:
-                    response = session.delete(url)
-                else:
-                    response = session.get(url)
-                return response.json()
+            if repo.hosting == 'github':
+                hosting = GithubHosting(repo.token)
+                return hosting.update_status_on_commit(owner, repository, status)
+
+            # For the Bitbucket hosting, this feature does not exists.
 
     def update(self, cr, uid, ids, context=None):
         for repo in self.browse(cr, uid, ids, context=context):
@@ -257,28 +425,59 @@ class runbot_repo(osv.osv):
         if not os.path.isdir(os.path.join(repo.path, 'refs')):
             run(['git', 'clone', '--bare', repo.name, repo.path])
         else:
+            # We fetch all the branches
             repo.git(['fetch', '-p', 'origin', '+refs/heads/*:refs/heads/*'])
-            repo.git(['fetch', '-p', 'origin', '+refs/pull/*/head:refs/pull/*'])
+            if repo.hosting == 'github':
+                # In the case where we use the Github Hosting, we can have
+                # the pull request in the references of Git.
+                repo.git(['fetch', '-p', 'origin', '+refs/pull/*/head:refs/pull/*'])
+            # We fetch all the tags
+            repo.git(['fetch', '-p', 'origin', '+refs/tags/*:refs/tags/*'])
 
-        fields = ['refname','objectname','committerdate:iso8601','authorname','subject','committername']
+        fields = [
+            'refname', 'objectname', 'committerdate:iso8601', 'authorname',
+            'subject','committername'
+        ]
         fmt = "%00".join(["%("+field+")" for field in fields])
-        git_refs = repo.git(['for-each-ref', '--format', fmt, '--sort=-committerdate', 'refs/heads', 'refs/pull'])
+
+        git_refs = repo.git([
+            'for-each-ref', '--format', fmt, '--sort=-committerdate',
+            'refs/heads', 'refs/pull', 'refs/tags'
+        ])
+
         git_refs = git_refs.strip()
 
-        refs = [[decode_utf(field) for field in line.split('\x00')] for line in git_refs.split('\n')]
+        refs = [
+            [decode_utf(field) for field in line.split('\x00')]
+            for line in git_refs.split('\n')
+        ]
 
         for name, sha, date, author, subject, committer in refs:
+            if repo.specific_reference and repo.specific_reference != name:
+                continue
+
             # create or get branch
             branch_ids = Branch.search(cr, uid, [('repo_id', '=', repo.id), ('name', '=', name)])
             if branch_ids:
                 branch_id = branch_ids[0]
             else:
                 _logger.debug('repo %s found new branch %s', repo.name, name)
-                branch_id = Branch.create(cr, uid, {'repo_id': repo.id, 'name': name})
+                values = {
+                    'repo_id': repo.id,
+                    'name': name
+                }
+                if repo.specific_reference == name:
+                    values['sticky'] = True
+
+                branch_id = Branch.create(cr, uid, values)
+
+            # We load the branch
             branch = Branch.browse(cr, uid, [branch_id], context=context)[0]
-            # skip build for old branches
-            if dateutil.parser.parse(date[:19]) + datetime.timedelta(30) < datetime.datetime.now():
+
+            # skip build for old not sticky branches
+            if not branch.sticky and dateutil.parser.parse(date[:19]) + datetime.timedelta(30) < datetime.datetime.now():
                 continue
+
             # create build (and mark previous builds as skipped) if not found
             build_ids = Build.search(cr, uid, [('branch_id', '=', branch.id), ('name', '=', sha)])
             if not build_ids:
@@ -301,14 +500,15 @@ class runbot_repo(osv.osv):
         # skip old builds (if their sequence number is too low, they will not ever be built)
         skippable_domain = [('repo_id', '=', repo.id), ('state', '=', 'pending')]
         icp = self.pool['ir.config_parameter']
-        running_max = int(icp.get_param(cr, uid, 'runbot.running_max', default=75))
+        running_max = int(icp.get_param(cr, uid, 'runbot.running_max', default=RUNBOT_DEFAULT_RUNNING_MAX))
         to_be_skipped_ids = Build.search(cr, uid, skippable_domain, order='sequence desc', offset=running_max)
         Build.skip(cr, uid, to_be_skipped_ids)
 
     def scheduler(self, cr, uid, ids=None, context=None):
         icp = self.pool['ir.config_parameter']
-        workers = int(icp.get_param(cr, uid, 'runbot.workers', default=6))
-        running_max = int(icp.get_param(cr, uid, 'runbot.running_max', default=75))
+        workers = int(icp.get_param(cr, uid, 'runbot.workers', default=RUNBOT_DEFAULT_WORKERS))
+        running_max = int(icp.get_param(cr, uid, 'runbot.running_max', default=RUNBOT_DEFAULT_RUNNING_MAX))
+
         host = fqdn()
 
         Build = self.pool['runbot.build']
@@ -399,15 +599,21 @@ class runbot_branch(osv.osv):
 
     def _get_branch_url(self, cr, uid, ids, field_name, arg, context=None):
         r = {}
+
         for branch in self.browse(cr, uid, ids, context=context):
-            if re.match('^[0-9]+$', branch.branch_name):
-                r[branch.id] = "https://%s/pull/%s" % (branch.repo_id.base, branch.branch_name)
+            owner, repository = branch.repo_id.base.split('/')[1:]
+            mapping = HOSTING_MAPPING[branch.repo_id.hosting]
+
+            if is_pull_request(branch.branch_name):
+                r[branch.id] = mapping.get_pull_request_url(owner, repository, branch.branch_name)
             else:
-                r[branch.id] = "https://%s/tree/%s" % (branch.repo_id.base, branch.branch_name)
+                r[branch.id] = mapping.get_branch_url(owner, repository, branch.branch_name)
+
         return r
 
     _columns = {
         'repo_id': fields.many2one('runbot.repo', 'Repository', required=True, ondelete='cascade', select=1),
+        'repo_specific_ref': fields.related('repo_id', 'specific_reference', type='char'),
         'name': fields.char('Ref Name', required=True),
         'branch_name': fields.function(_get_branch_name, type='char', string='Branch', readonly=1, store=True),
         'branch_url': fields.function(_get_branch_url, type='char', string='Branch url', readonly=1),
@@ -429,9 +635,8 @@ class runbot_build(osv.osv):
 
     def _get_time(self, cr, uid, ids, field_name, arg, context=None):
         """Return the time taken by the tests"""
-        r = {}
+        r = dict.fromkeys(ids, 0)
         for build in self.browse(cr, uid, ids, context=context):
-            r[build.id] = 0
             if build.job_end:
                 r[build.id] = int(dt2time(build.job_end) - dt2time(build.job_start))
             elif build.job_start:
@@ -440,9 +645,8 @@ class runbot_build(osv.osv):
 
     def _get_age(self, cr, uid, ids, field_name, arg, context=None):
         """Return the time between job start and now"""
-        r = {}
+        r = dict.fromkeys(ids, 0)
         for build in self.browse(cr, uid, ids, context=context):
-            r[build.id] = 0
             if build.job_start:
                 r[build.id] = int(time.time() - dt2time(build.job_start))
         return r
@@ -505,7 +709,7 @@ class runbot_build(osv.osv):
             extra_info.update({'state': 'duplicate', 'duplicate_id': duplicate_ids[0]})
             self.write(cr, uid, [duplicate_ids[0]], {'duplicate_id': build_id})
             if self.browse(cr, uid, duplicate_ids[0]).state != 'pending':
-                self.github_status(cr, uid, [build_id])
+                self.update_status_on_commit(cr, uid, [build_id])
         self.write(cr, uid, [build_id], extra_info, context=context)
 
     def reset(self, cr, uid, ids, context=None):
@@ -551,8 +755,9 @@ class runbot_build(osv.osv):
             # Use github API to find name of branch on which the PR is made
             if repo.token and name.startswith('refs/pull/'):
                 pull_number = name[len('refs/pull/'):]
-                pr = repo.github('/repos/:owner/:repo/pulls/%s' % pull_number)
-                name = 'refs/heads/' + pr['base']['ref']
+
+                name = self.repo.get_pull_request_branch(pull_number)
+
             # Find common branch names between repo and target repo
             branch_ids = branch_pool.search(cr, uid, [('repo_id.id', '=', repo.id)])
             target_ids = branch_pool.search(cr, uid, [('repo_id.id', '=', target_repo_id)])
@@ -574,16 +779,16 @@ class runbot_build(osv.osv):
                     name = sorted(common_refs.iteritems(), key=operator.itemgetter(1), reverse=True)[0][0]
             return name
 
-    def path(self, cr, uid, ids, *l, **kw):
+    def path(self, cr, uid, ids, *args, **kwargs):
         for build in self.browse(cr, uid, ids, context=None):
             root = self.pool['runbot.repo'].root(cr, uid)
-            return os.path.join(root, 'build', build.dest, *l)
+            return os.path.join(root, 'build', build.dest, *args)
 
-    def server(self, cr, uid, ids, *l, **kw):
+    def server(self, cr, uid, ids, *args, **kwargs):
         for build in self.browse(cr, uid, ids, context=None):
             if os.path.exists(build.path('odoo')):
-                return build.path('odoo', *l)
-            return build.path('openerp', *l)
+                return build.path('odoo', *args)
+            return build.path('openerp', *args)
 
     def checkout(self, cr, uid, ids, context=None):
         for build in self.browse(cr, uid, ids, context=context):
@@ -717,12 +922,15 @@ class runbot_build(osv.osv):
         p=subprocess.Popen(cmd, stdout=out, stderr=stderr, preexec_fn=preexec_fn, shell=shell)
         return p.pid
 
-    def github_status(self, cr, uid, ids, context=None):
+    def update_status_on_commit(self, cr, uid, ids, context=None):
         """Notify github of failed/successful builds"""
         runbot_domain = self.pool['runbot.repo'].domain(cr, uid)
         for build in self.browse(cr, uid, ids, context=context):
+            if not (build.repo_id.hosting and build.repo_id.hosting in ('github', 'bitbucket')):
+                continue
+
             if build.state != 'duplicate' and build.duplicate_id:
-                self.github_status(cr, uid, [build.duplicate_id.id], context=context)
+                self.update_status_on_commit(cr, uid, [build.duplicate_id.id], context=context)
             desc = "runbot build %s" % (build.dest,)
             real_build = build.duplicate_id if build.state == 'duplicate' else build
             if real_build.state == 'testing':
@@ -736,21 +944,22 @@ class runbot_build(osv.osv):
             else:
                 continue
 
-            status = {
-                "state": state,
-                "target_url": "http://%s/runbot/build/%s" % (runbot_domain, build.id),
-                "description": desc,
-                "context": "continuous-integration/runbot"
-            }
             try:
-                build.repo_id.github('/repos/:owner/:repo/statuses/%s' % build.name, status)
-                _logger.debug("github status %s update to %s", build.name, state)
+                if build.repo_id.hosting == 'github':
+                    status = {
+                        "state": state,
+                        "target_url": "http://%s/runbot/build/%s" % (runbot_domain, build.id),
+                        "description": desc,
+                        "context": "continuous-integration/runbot"
+                    }
+                    build.repo_id.update_status_on_commit(status)
+                    _logger.debug('github status %s update to %s', build.name, state)
             except Exception:
-                _logger.exception("github status error")
+                _logger.exception('github status error')
 
     def job_10_test_base(self, cr, uid, build, lock_path, log_path):
         build._log('test_base', 'Start test base module')
-        build.github_status()
+        build.update_status_on_commit()
         # checkout source
         build.checkout()
         # run base test
@@ -790,7 +999,7 @@ class runbot_build(osv.osv):
         else:
             v['result'] = "ko"
         build.write(v)
-        build.github_status()
+        build.update_status_on_commit()
 
         # run server
         cmd, mods = build.cmd()
@@ -932,7 +1141,7 @@ class runbot_build(osv.osv):
             build._log('kill', 'Kill build %s' % build.dest)
             build.terminate()
             build.write({'result': 'killed', 'job': False})
-            build.github_status()
+            build.update_status_on_commit()
 
     def reap(self, cr, uid, ids):
         while True:
@@ -983,7 +1192,7 @@ class RunbotController(http.Controller):
         repo_obj = registry['runbot.repo']
         count = lambda dom: build_obj.search_count(cr, uid, dom)
 
-        repo_ids = repo_obj.search(cr, uid, [], order='id')
+        repo_ids = repo_obj.search(cr, uid, [('visible', '=', True)], order='id')
         repos = repo_obj.browse(cr, uid, repo_ids)
         if not repo and repos:
             repo = repos[0] 
