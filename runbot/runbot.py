@@ -415,6 +415,7 @@ class runbot_repo(osv.osv):
     def update(self, cr, uid, ids, context=None):
         for repo in self.browse(cr, uid, ids, context=context):
             self.update_git(cr, uid, repo)
+        return True
 
     def update_git(self, cr, uid, repo, context=None):
         _logger.debug('repo %s updating branches', repo.name)
@@ -847,6 +848,8 @@ class runbot_build(osv.osv):
                         'Building environment',
                         'You have duplicate modules in your branches "%s"' % basename
                     )
+
+        return True
 
     def pg_dropdb(self, cr, uid, dbname):
         run(['dropdb', dbname])
