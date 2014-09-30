@@ -29,6 +29,12 @@
                                 <field name="name"/>
                             </tree>
                         </field>
+                        <field name="dependency_nested_ids">
+                            <tree editable="True">
+                                <field name="repository_id"/>
+                                <field name="reference" />
+                            </tree>
+                        </field>
                         <field name="modules"/>
                         <field name="token"/>
                         <field name="hosting" />

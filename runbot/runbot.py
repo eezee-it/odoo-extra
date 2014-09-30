@@ -300,6 +300,19 @@ HOSTING_MAPPING = {
 # RunBot Models
 #----------------------------------------------------------
 
+class runbot_repo_dep(osv.osv):
+    _name = 'runbot.repo.dep'
+
+    _columns = {
+        'repo_id': fields.many2one('runbot.repo', 'Repository', required=True),
+        'repository_id': fields.many2one('runbot.repo', 'Repository', required=True),
+        'reference': fields.char('Reference', required=True),
+    }
+
+    _defaults = {
+        'reference': 'refs/heads/master',
+    }
+
 class runbot_repo(osv.osv):
     _name = "runbot.repo"
     _order = 'name'
@@ -341,6 +354,10 @@ class runbot_repo(osv.osv):
             id1='dependant_id', id2='dependency_id',
             string='Extra dependencies',
             help="Community addon repos which need to be present to run tests."),
+        'dependency_nested_ids': fields.one2many(
+            'runbot.repo.dep', 'repo_id',
+            string='Nested Dependencies'
+        ),
         'token': fields.char("Access Token"),
         'hosting': fields.selection(REPOSITORY_HOSTING, string='Hosting'),
         'username': fields.char('Username'),
@@ -829,6 +846,9 @@ class runbot_build(osv.osv):
                     os.path.dirname(module)
                     for module in glob.glob(build.path('*/__openerp__.py'))
                 ]
+
+            for extra_repo in build.repo_id.dependency_nested_ids:
+                extra_repo.repository_id.git_export(extra_repo.reference, build.path())
 
             # move all addons to server addons path
             for module in set(glob.glob(build.path('addons/*')) + additional_modules):
