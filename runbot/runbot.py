@@ -233,7 +233,7 @@ class Hosting(object):
         tmp_endpoint = endpoint % tuple(args)
         return '%s%s' % (cls.URL, tmp_endpoint)
 
-    def update_status_on_commit(self, owner, repository, commit_hash):
+    def update_status_on_commit(self, owner, repository, commit_hash, status):
         raise NotImplemented()
 
 class GithubHosting(Hosting):
@@ -395,7 +395,7 @@ class runbot_repo(osv.osv):
 
                 return hosting.get_pull_request_branch(owner, repository, pull_number)
 
-    def update_status_on_commit(self, cr, uid, ids, status, context=None):
+    def update_status_on_commit(self, cr, uid, ids, commit_hash, status, context=None):
         for repo in self.browse(cr, uid, ids, context=context):
 
             match = re.search('([^/]+)/([^/]+)/([^/.]+(.git)?)', repo.base)
@@ -408,7 +408,7 @@ class runbot_repo(osv.osv):
 
             if repo.hosting == 'github':
                 hosting = GithubHosting(repo.token)
-                return hosting.update_status_on_commit(owner, repository, status)
+                return hosting.update_status_on_commit(owner, repository, commit_hash, status)
 
             # For the Bitbucket hosting, this feature does not exists.
 
@@ -958,7 +958,7 @@ class runbot_build(osv.osv):
                         "description": desc,
                         "context": "continuous-integration/runbot"
                     }
-                    build.repo_id.update_status_on_commit(status)
+                    build.repo_id.update_status_on_commit(build.name, status)
                     _logger.debug('github status %s update to %s', build.name, state)
             except Exception:
                 _logger.exception('github status error')
