@@ -345,7 +345,6 @@ class runbot_repo(osv.osv):
         'hosting': fields.selection(REPOSITORY_HOSTING, string='Hosting'),
         'username': fields.char('Username'),
         'password': fields.char('Password'),
-        'specific_reference': fields.char('Specific Reference', help="You can select a specific refs/tags/TAG or a specific refs/heads/BRANCH"),
         'visible': fields.boolean('Visible on the web interface of Runbot'),
     }
     _defaults = {
@@ -459,9 +458,6 @@ class runbot_repo(osv.osv):
         max_days = int(icp.get_param(cr, uid, 'runbot.branch_max_days', default=RUNBOT_MAXIMUM_DAYS))
 
         for name, sha, date, author, subject, committer in refs:
-            if repo.specific_reference and repo.specific_reference != name:
-                continue
-
             # create or get branch
             branch_ids = Branch.search(cr, uid, [('repo_id', '=', repo.id), ('name', '=', name)])
             if branch_ids:
@@ -472,9 +468,6 @@ class runbot_repo(osv.osv):
                     'repo_id': repo.id,
                     'name': name
                 }
-                if repo.specific_reference == name:
-                    values['sticky'] = True
-
                 branch_id = Branch.create(cr, uid, values)
 
             # We load the branch
@@ -619,7 +612,6 @@ class runbot_branch(osv.osv):
 
     _columns = {
         'repo_id': fields.many2one('runbot.repo', 'Repository', required=True, ondelete='cascade', select=1),
-        'repo_specific_ref': fields.related('repo_id', 'specific_reference', type='char', string='Reference'),
         'name': fields.char('Ref Name', required=True),
         'branch_name': fields.function(_get_branch_name, type='char', string='Branch', readonly=1, store=True),
         'branch_url': fields.function(_get_branch_url, type='char', string='Branch url', readonly=1),
@@ -670,7 +662,6 @@ class runbot_build(osv.osv):
     _columns = {
         'branch_id': fields.many2one('runbot.branch', 'Branch', required=True, ondelete='cascade', select=1),
         'repo_id': fields.related('branch_id', 'repo_id', type="many2one", relation="runbot.repo", string="Repository", readonly=True, store=True, ondelete='cascade', select=1),
-        'repo_specific_ref': fields.related('repo_id', 'specific_reference', type='char', string='Reference'),
         'name': fields.char('Revno', required=True, select=1),
         'host': fields.char('Host'),
         'port': fields.integer('Port'),

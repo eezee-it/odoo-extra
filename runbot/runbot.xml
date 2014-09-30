@@ -27,7 +27,6 @@
                         <field name="dependency_ids">
                             <tree>
                                 <field name="name"/>
-                                <field name="specific_reference" />
                             </tree>
                         </field>
                         <field name="modules"/>
@@ -35,7 +34,6 @@
                         <field name="hosting" />
                         <field name="username" />
                         <field name="password" />
-                        <field name="specific_reference" />
                         <field name="visible" />
                     </group>
                 </sheet>
@@ -50,7 +48,6 @@
                 <field name="testing"/>
                 <field name="running"/>
                 <field name="auto"/>
-                <field name="specific_reference" />
             </tree>
         </field>
     </record>
@@ -85,7 +82,6 @@
         <field name="arch" type="xml">
             <tree string="Branches">
                 <field name="repo_id"/>
-                <field name="repo_specific_ref" />
                 <field name="name"/>
                 <field name="sticky"/>
                 <field name="state"/>
@@ -155,7 +151,6 @@
             <tree string="Builds">
                 <field name="sequence"/>
                 <field name="repo_id"/>
-                <field name="repo_specific_ref" />
                 <field name="dest"/>
                 <field name="date"/>
                 <field name="author"/>
