@@ -718,6 +718,7 @@ class runbot_build(osv.osv):
             if self.browse(cr, uid, duplicate_ids[0]).state != 'pending':
                 self.update_status_on_commit(cr, uid, [build_id])
         self.write(cr, uid, [build_id], extra_info, context=context)
+        return build_id
 
     def reset(self, cr, uid, ids, context=None):
         self.write(cr, uid, ids, { 'state' : 'pending' }, context=context)
