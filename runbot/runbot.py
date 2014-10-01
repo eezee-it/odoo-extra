@@ -66,6 +66,7 @@ _re_job = re.compile('job_\d')
 
 RUNBOT_DEFAULT_RUNNING_MAX = 75
 RUNBOT_DEFAULT_WORKERS = 6
+RUNBOT_MAXIMUM_DAYS = 30
 #----------------------------------------------------------
 # RunBot helpers
 #----------------------------------------------------------
@@ -232,7 +233,7 @@ class Hosting(object):
         tmp_endpoint = endpoint % tuple(args)
         return '%s%s' % (cls.URL, tmp_endpoint)
 
-    def update_status_on_commit(self, owner, repository, commit_hash):
+    def update_status_on_commit(self, owner, repository, commit_hash, status):
         raise NotImplemented()
 
 class GithubHosting(Hosting):
@@ -299,6 +300,19 @@ HOSTING_MAPPING = {
 # RunBot Models
 #----------------------------------------------------------
 
+class runbot_repo_dep(osv.osv):
+    _name = 'runbot.repo.dep'
+
+    _columns = {
+        'repo_id': fields.many2one('runbot.repo', 'Repository', required=True),
+        'repository_id': fields.many2one('runbot.repo', 'Repository', required=True),
+        'reference': fields.char('Reference', required=True),
+    }
+
+    _defaults = {
+        'reference': 'refs/heads/master',
+    }
+
 class runbot_repo(osv.osv):
     _name = "runbot.repo"
     _order = 'name'
@@ -340,11 +354,14 @@ class runbot_repo(osv.osv):
             id1='dependant_id', id2='dependency_id',
             string='Extra dependencies',
             help="Community addon repos which need to be present to run tests."),
+        'dependency_nested_ids': fields.one2many(
+            'runbot.repo.dep', 'repo_id',
+            string='Nested Dependencies'
+        ),
         'token': fields.char("Access Token"),
         'hosting': fields.selection(REPOSITORY_HOSTING, string='Hosting'),
         'username': fields.char('Username'),
         'password': fields.char('Password'),
-        'specific_reference': fields.char('Specific Reference', help="You can select a specific refs/tags/TAG or a specific refs/heads/BRANCH"),
         'visible': fields.boolean('Visible on the web interface of Runbot'),
     }
     _defaults = {
@@ -380,13 +397,13 @@ class runbot_repo(osv.osv):
             p2.communicate()[0]
 
     def get_pull_request_branch(self, cr, uid, ids, pull_number, context=None):
-        match = re.search('([^/]+)/([^/]+)/([^/.]+(.git)?)', repo.base)
+        for repo in self.browse(cr, uid, ids, context=context):
+            match = re.search('([^/]+)/([^/]+)/([^/.]+(.git)?)', repo.base)
 
-        if match:
-            owner = match.group(2)
-            repository = match.group(3)
+            if match:
+                owner = match.group(2)
+                repository = match.group(3)
 
-            for repo in self.browse(cr, uid, ids, context=context):
                 if repo.hosting == 'github':
                     hosting = GithubHosting(repo.token)
                 elif repo.hosting == 'bitbucket':
@@ -394,25 +411,27 @@ class runbot_repo(osv.osv):
 
                 return hosting.get_pull_request_branch(owner, repository, pull_number)
 
-    def update_status_on_commit(self, cr, uid, ids, status, context=None):
-        match = re.search('([^/]+)/([^/]+)/([^/.]+(.git)?)', repo.base)
-
-        if not match:
-            return
-
-        owner = match.group(2)
-        repository = match.group(3)
-
+    def update_status_on_commit(self, cr, uid, ids, commit_hash, status, context=None):
         for repo in self.browse(cr, uid, ids, context=context):
+
+            match = re.search('([^/]+)/([^/]+)/([^/.]+(.git)?)', repo.base)
+
+            if not match:
+                return
+
+            owner = match.group(2)
+            repository = match.group(3)
+
             if repo.hosting == 'github':
                 hosting = GithubHosting(repo.token)
-                return hosting.update_status_on_commit(owner, repository, status)
+                return hosting.update_status_on_commit(owner, repository, commit_hash, status)
 
             # For the Bitbucket hosting, this feature does not exists.
 
     def update(self, cr, uid, ids, context=None):
         for repo in self.browse(cr, uid, ids, context=context):
             self.update_git(cr, uid, repo)
+        return True
 
     def update_git(self, cr, uid, repo, context=None):
         _logger.debug('repo %s updating branches', repo.name)
@@ -452,10 +471,10 @@ class runbot_repo(osv.osv):
             for line in git_refs.split('\n')
         ]
 
-        for name, sha, date, author, subject, committer in refs:
-            if repo.specific_reference and repo.specific_reference != name:
-                continue
+        icp = self.pool['ir.config_parameter']
+        max_days = int(icp.get_param(cr, uid, 'runbot.branch_max_days', default=RUNBOT_MAXIMUM_DAYS))
 
+        for name, sha, date, author, subject, committer in refs:
             # create or get branch
             branch_ids = Branch.search(cr, uid, [('repo_id', '=', repo.id), ('name', '=', name)])
             if branch_ids:
@@ -466,16 +485,13 @@ class runbot_repo(osv.osv):
                     'repo_id': repo.id,
                     'name': name
                 }
-                if repo.specific_reference == name:
-                    values['sticky'] = True
-
                 branch_id = Branch.create(cr, uid, values)
 
             # We load the branch
             branch = Branch.browse(cr, uid, [branch_id], context=context)[0]
 
             # skip build for old not sticky branches
-            if not branch.sticky and dateutil.parser.parse(date[:19]) + datetime.timedelta(30) < datetime.datetime.now():
+            if not branch.sticky and dateutil.parser.parse(date[:19]) + datetime.timedelta(max_days) < datetime.datetime.now():
                 continue
 
             # create build (and mark previous builds as skipped) if not found
@@ -613,7 +629,6 @@ class runbot_branch(osv.osv):
 
     _columns = {
         'repo_id': fields.many2one('runbot.repo', 'Repository', required=True, ondelete='cascade', select=1),
-        'repo_specific_ref': fields.related('repo_id', 'specific_reference', type='char'),
         'name': fields.char('Ref Name', required=True),
         'branch_name': fields.function(_get_branch_name, type='char', string='Branch', readonly=1, store=True),
         'branch_url': fields.function(_get_branch_url, type='char', string='Branch url', readonly=1),
@@ -711,6 +726,7 @@ class runbot_build(osv.osv):
             if self.browse(cr, uid, duplicate_ids[0]).state != 'pending':
                 self.update_status_on_commit(cr, uid, [build_id])
         self.write(cr, uid, [build_id], extra_info, context=context)
+        return build_id
 
     def reset(self, cr, uid, ids, context=None):
         self.write(cr, uid, ids, { 'state' : 'pending' }, context=context)
@@ -831,6 +847,9 @@ class runbot_build(osv.osv):
                     for module in glob.glob(build.path('*/__openerp__.py'))
                 ]
 
+            for extra_repo in build.repo_id.dependency_nested_ids:
+                extra_repo.repository_id.git_export(extra_repo.reference, build.path())
+
             # move all addons to server addons path
             for module in set(glob.glob(build.path('addons/*')) + additional_modules):
                 basename = os.path.basename(module)
@@ -841,6 +860,8 @@ class runbot_build(osv.osv):
                         'Building environment',
                         'You have duplicate modules in your branches "%s"' % basename
                     )
+
+        return True
 
     def pg_dropdb(self, cr, uid, dbname):
         run(['dropdb', dbname])
@@ -952,7 +973,7 @@ class runbot_build(osv.osv):
                         "description": desc,
                         "context": "continuous-integration/runbot"
                     }
-                    build.repo_id.update_status_on_commit(status)
+                    build.repo_id.update_status_on_commit(build.name, status)
                     _logger.debug('github status %s update to %s', build.name, state)
             except Exception:
                 _logger.exception('github status error')
