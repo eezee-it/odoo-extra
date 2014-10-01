@@ -304,8 +304,8 @@ class runbot_repo_dep(osv.osv):
     _name = 'runbot.repo.dep'
 
     _columns = {
-        'repo_id': fields.many2one('runbot.repo', 'Repository', required=True),
-        'repository_id': fields.many2one('runbot.repo', 'Repository', required=True),
+        'repo_id': fields.many2one('runbot.repo', 'Repository', required=True, ondelete='cascade'),
+        'repository_id': fields.many2one('runbot.repo', 'Repository', required=True, ondelete='cascade'),
         'reference': fields.char('Reference', required=True),
     }
 
