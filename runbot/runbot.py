@@ -850,6 +850,13 @@ class runbot_build(osv.osv):
             for extra_repo in build.repo_id.dependency_nested_ids:
                 extra_repo.repository_id.git_export(extra_repo.reference, build.path())
 
+            additional_modules += [
+                os.path.dirname(module)
+                for module in glob.glob(build.path('*/__openerp__.py'))
+            ]
+
+            additional_modules = list(set(additional_modules))
+
             # move all addons to server addons path
             for module in set(glob.glob(build.path('addons/*')) + additional_modules):
                 basename = os.path.basename(module)
