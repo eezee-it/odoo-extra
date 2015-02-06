@@ -1368,6 +1368,18 @@ class RunbotController(http.Controller):
         #context['level'] = level
         return request.render("runbot.build", context)
 
+    @http.route(['/runbot/build/<build_id>/stop'], type='http', auth="public", website=True)
+    def build_stop(self, build_id=None, search=None, **post):
+        registry, cr, uid, context = request.registry, request.cr, 1, request.context
+
+        Build = registry['runbot.build']
+        build = Build.browse(cr, uid, [int(build_id)])[0]
+
+        build.kill()
+
+        repo_id = Build.force(cr, uid, [int(build_id)])
+        return werkzeug.utils.redirect('/runbot/repo/%s' % repo_id)
+
     @http.route(['/runbot/build/<build_id>/force'], type='http', auth="public", methods=['POST'])
     def build_force(self, build_id, **post):
         registry, cr, uid, context = request.registry, request.cr, 1, request.context

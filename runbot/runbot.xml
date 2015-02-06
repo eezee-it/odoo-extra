@@ -289,6 +289,8 @@
                     <!-- <li><a t-if="repo.hosting == 'bitbucket'" t-attf-href="https://{{repo.base}}/compare/{{br['branch'].branch_name}}">Compare <i class="fa fa-bitbucket"/></a></li> -->
 
                     <!-- TODO branch.pull from -->
+                    <li t-if="bu['state']=='testing'" class="divider"></li>
+                    <li><a t-if="bu['state']=='testing'" t-attf-href="/runbot/build/{{bu['id']}}/stop">Kill build</a></li>
                     <li class="divider"></li>
                     <li class="disabled"><a href="#">Runtime: <t t-esc="bu['job_time']"/>s</a></li>
                     <li class="disabled"><a href="#">Port: <t t-esc="bu['port']"/></a></li>
