@@ -1377,8 +1377,7 @@ class RunbotController(http.Controller):
 
         build.kill()
 
-        repo_id = Build.force(cr, uid, [int(build_id)])
-        return werkzeug.utils.redirect('/runbot/repo/%s' % repo_id)
+        return werkzeug.utils.redirect('/runbot/repo/%s' % build.repo_id)
 
     @http.route(['/runbot/build/<build_id>/force'], type='http', auth="public", methods=['POST'])
     def build_force(self, build_id, **post):
