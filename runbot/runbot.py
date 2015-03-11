@@ -585,7 +585,8 @@ class runbot_repo(osv.osv):
             try:
                 _logger.debug('reload nginx')
                 pid = int(open(os.path.join(nginx_dir, 'nginx.pid')).read().strip(' \n'))
-                os.kill(pid, signal.SIGHUP)
+                if pid != 0:
+                    os.kill(pid, signal.SIGHUP)
             except Exception:
                 _logger.debug('start nginx')
                 run(['/usr/sbin/nginx', '-p', nginx_dir, '-c', 'nginx.conf'])
@@ -1152,11 +1153,12 @@ class runbot_build(osv.osv):
 
     def terminate(self, cr, uid, ids, context=None):
         for build in self.browse(cr, uid, ids, context=context):
-            build.logger('killing %s', build.pid)
-            try:
-                os.killpg(build.pid, signal.SIGKILL)
-            except OSError:
-                pass
+            if build.pid != 0:
+                build.logger('killing %s', build.pid)
+                try:
+                    os.killpg(build.pid, signal.SIGKILL)
+                except OSError:
+                    pass
             build.write({'state': 'done'})
             cr.commit()
             self.pg_dropdb(cr, uid, "%s-base" % build.dest)
@@ -1377,7 +1379,7 @@ class RunbotController(http.Controller):
 
         build.kill()
 
-        return werkzeug.utils.redirect('/runbot/repo/%s' % build.repo_id)
+        return werkzeug.utils.redirect('/runbot/repo/%s' % build.repo_id.id)
 
     @http.route(['/runbot/build/<build_id>/force'], type='http', auth="public", methods=['POST'])
     def build_force(self, build_id, **post):
