@@ -38,6 +38,23 @@
                             </div>
                         </div>
                     </group>
+                    <group>
+                        <label for="id" string="Database"/>
+                        <div>
+                            <div>
+                                <field name="default_db_user" class="oe_inline"/>
+                                <label for="default_db_user"/>
+                            </div>
+                            <div>
+                                <field name="default_db_host" class="oe_inline"/>
+                                <label for="default_db_host"/>
+                            </div>
+                            <div>
+                                <field name="default_db_port" class="oe_inline"/>
+                                <label for="default_db_port"/>
+                            </div>
+                        </div>
+                    </group>
                 </form>
             </field>
         </record>

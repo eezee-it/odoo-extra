@@ -742,7 +742,10 @@ class runbot_build(osv.osv):
             build.write({'modules': ','.join(modules_to_test)})
 
     def pg_dropdb(self, cr, uid, dbname):
-        run(['dropdb', dbname])
+        cmd = ['dropdb', dbname]
+        cmd = self.pg_set_env(cr, uid, cmd)
+
+        run(cmd)
         # cleanup filestore
         datadir = appdirs.user_data_dir()
         paths = [os.path.join(datadir, pn, 'filestore', dbname) for pn in 'OpenERP Odoo'.split()]
@@ -751,7 +754,30 @@ class runbot_build(osv.osv):
     def pg_createdb(self, cr, uid, dbname):
         self.pg_dropdb(cr, uid, dbname)
         _logger.debug("createdb %s", dbname)
-        run(['createdb', '--encoding=unicode', '--lc-collate=C', '--template=template0', dbname])
+        cmd = ['createdb', '--encoding=unicode', '--lc-collate=C', '--template=template0', dbname]
+        cmd = self.pg_set_env(cr, uid, cmd)
+
+        run(cmd)
+
+    def pg_set_env(self, cr, uid, cmd):
+        """
+        Set the user, the host and the port to use runbot in a multi users environment
+        :param cmd: A list of commands to execute
+        :return: A list of commands to execute with database settings
+        """
+        icp = self.pool['ir.config_parameter']
+        db_user = icp.get_param(cr, uid, 'runbot.db_user')
+        db_host = icp.get_param(cr, uid, 'runbot.db_host')
+        db_port = icp.get_param(cr, uid, 'runbot.db_port')
+
+        if db_user:
+            cmd.append('--username=%s' % db_user)
+        if db_host:
+            cmd.append('--host=%s' % db_host)
+        if db_port:
+            cmd.append('--port=%s' % db_port)
+
+        return cmd
 
     def cmd(self, cr, uid, ids, context=None):
         """Return a list describing the command to start the build"""

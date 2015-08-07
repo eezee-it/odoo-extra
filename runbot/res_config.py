@@ -30,6 +30,9 @@ class runbot_config_settings(osv.osv_memory):
         'default_timeout': fields.integer('Default Timeout (in seconds)'),
         'default_starting_port': fields.integer('Starting Port for Running Builds'),
         'default_domain': fields.char('Runbot Domain'),
+        'default_db_user': fields.char('Database User'),
+        'default_db_host': fields.char('Database Host'),
+        'default_db_port': fields.char('Database Port'),
     }
 
     def get_default_parameters(self, cr, uid, fields, context=None):
@@ -39,12 +42,18 @@ class runbot_config_settings(osv.osv_memory):
         timeout = icp.get_param(cr, uid, 'runbot.timeout', default=1800)
         starting_port = icp.get_param(cr, uid, 'runbot.starting_port', default=2000)
         runbot_domain = icp.get_param(cr, uid, 'runbot.domain', default='runbot.odoo.com')
+        db_user = icp.get_param(cr, uid, 'runbot.db_user')
+        db_host = icp.get_param(cr, uid, 'runbot.db_host')
+        db_port = icp.get_param(cr, uid, 'runbot.db_port')
         return {
         	'default_workers': int(workers),
         	'default_running_max': int(running_max),
             'default_timeout': int(timeout),
             'default_starting_port': int(starting_port),
             'default_domain': runbot_domain,
+            'default_db_user': db_user,
+            'default_db_host': db_host,
+            'default_db_port': db_port,
         }
 
     def set_default_parameters(self, cr, uid, ids, context=None):
@@ -55,6 +64,9 @@ class runbot_config_settings(osv.osv_memory):
         icp.set_param(cr, uid, 'runbot.timeout', config.default_timeout)
         icp.set_param(cr, uid, 'runbot.starting_port', config.default_starting_port)
         icp.set_param(cr, uid, 'runbot.domain', config.default_domain)
+        icp.set_param(cr, uid, 'runbot.db_user', config.default_db_user)
+        icp.set_param(cr, uid, 'runbot.db_host', config.default_db_host)
+        icp.set_param(cr, uid, 'runbot.db_port', config.default_db_port)
 
 
 # vim:expandtab:smartindent:tabstop=4:softtabstop=4:shiftwidth=4:
